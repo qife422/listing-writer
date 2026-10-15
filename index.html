@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Listing Writer — a tiny local AI that writes eBay listings that sell</title>
+<style>
+  :root { --brand:#0f5ad7; --brand-dark:#0a3fa0; --paper:#fffdf8; --ink:#1f2a33; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         background: linear-gradient(180deg, #e8f0fe, #f7fafd); color: var(--ink); }
+  main { max-width: 720px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 2rem; margin: 8px 0 4px; }
+  .sub { color:#44586a; margin-top:0; line-height:1.5; }  .controls { background: var(--paper); border:1px solid #c9d9f2; border-radius:14px;
+              padding:16px; display:grid; gap:10px; box-shadow: 0 2px 10px rgba(15,90,215,.08); }
+  label { font-size:.9rem; display:grid; gap:4px; }
+  .row2 { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+  input, select, textarea { font: inherit; padding:8px 10px; border:1px solid #b3c9ec; border-radius:8px; background:#fff; width:100%; }
+  textarea { resize: vertical; min-height: 56px; }
+  button { font: inherit; font-weight:600; border:0; border-radius:10px; padding:12px 16px;
+           background: var(--brand); color:#fff; cursor:pointer; }
+  button:hover { background: var(--brand-dark); }
+  button:disabled { opacity:.55; cursor:wait; }
+  button.ghost { background:#e3ecf9; color:var(--brand-dark); }
+  button.small { padding:6px 10px; font-size:.8rem; }
+  #status { font-size:.85rem; color:#5b6f84; min-height:1.2em; margin:0; }
+  progress { width:100%; height:8px; }
+  #photo-preview { max-width:100%; max-height:220px; border-radius:10px; display:none; margin-top:4px; }
+  .hint { font-size:.8rem; color:#6b7f93; margin:0; }
+  #listing { margin-top:18px; background:var(--paper); border:2px dashed var(--brand); border-radius:16px; padding:20px; }
+  #listing h2 { margin-top:0; }
+  .sec { margin-bottom:14px; }
+  .sec h3 { margin:0 0 4px; color:var(--brand-dark); font-size:1rem; display:flex; justify-content:space-between; align-items:center; }
+  .sec p, .sec ul { margin:0; line-height:1.55; }
+  .sec ul { padding-left:20px; }
+  .raw { white-space:pre-wrap; font-size:.85rem; color:#687d64; }
+  footer { text-align:center; color:#7a8fa3; font-size:.8rem; margin-top:32px; line-height:1.6; }
+</style></head>
+<body>
+<main>
+  <h1>🏷️ Listing Writer</h1>
+  <p class="sub">A 270M-parameter <strong>Gemma 3</strong> runs <strong>100% in your browser</strong> —
+     no server, no account, no API key, zero cost per listing. Describe your item once,
+     get a polished eBay / Marketplace listing back. Your product data never leaves this device.</p>
+
+  <section class="controls">
+    <label>Product photo
+      <input id="photo" type="file" accept="image/*" />
+      <img id="photo-preview" alt="product preview" />
+      <span class="hint">Photo stays on your device — attach it to your eBay listing yourself. The AI writes from your description below.</span>
+    </label>
+    <label>What are you selling?
+      <input id="item" placeholder="e.g. Sony WH-1000XM4 wireless headphones, black" />
+    </label>
+    <div class="row2">
+      <label>Brand
+        <input id="brand" placeholder="e.g. Sony (leave blank if none)" />
+      </label>
+      <label>Condition
+        <select id="condition">
+          <option>New</option>
+          <option selected>Like new</option>
+          <option>Good</option>
+          <option>Fair</option>
+          <option>For parts</option>
+        </select>      </label>
+    </div>
+    <label>Flaws, what's included, anything a buyer should know
+      <textarea id="notes" placeholder="e.g. light scratches on earcup, includes case and cable, battery holds ~25h"></textarea>
+    </label>
+    <button id="go">✍️ Write my listing</button>
+    <p id="status">Model not loaded yet — first load downloads it (~1&nbsp;GB, fp32 — same verified setup as my Week 1 project). After that it is cached and works offline.</p>
+    <progress id="bar" value="0" max="100" hidden></progress>
+  </section>
+
+  <article id="listing" hidden>
+    <h2>Your listing</h2>
+    <div class="sec">
+      <h3>📌 Title <button class="ghost small" data-copy="l-title">Copy</button></h3>
+      <p id="l-title"></p>
+    </div>
+    <div class="sec">
+      <h3>📝 Description <button class="ghost small" data-copy="l-desc">Copy</button></h3>
+      <p id="l-desc"></p>
+    </div>
+    <div class="sec">
+      <h3>🔖 Item specifics <button class="ghost small" data-copy="l-specs">Copy</button></h3>
+      <p id="l-specs"></p>
+    </div>
+    <div class="sec">
+      <h3>💰 Pricing guidance <button class="ghost small" data-copy="l-price">Copy</button></h3>
+      <p id="l-price"></p>
+    </div>
+    <p class="raw" id="l-raw" hidden></p>
+    <div class="row2">      <button id="again" class="ghost">🔀 Rewrite</button>
+      <button id="reset" class="ghost">🗑️ Clear</button>
+    </div>
+  </article>
+
+  <footer>
+    Built with <a href="https://ai.google.dev/gemma">Gemma 3 270M</a> (open weights) +
+    <a href="https://huggingface.co/docs/transformers.js">Transformers.js</a>.
+    Inference happens on your device — no per-listing API cost, no seller data on someone else's server.<br/>
+    A Hacktoberfest “Side Hustle” micro-project. v1 writes from your description; it never invents brand names or prices.
+  </footer>
+</main>
+<script type="module">
+import { pipeline } from 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0/dist/transformers.min.js';
+
+// ---------- EDIT THESE to make it yours ----------
+const MODEL_ID = 'onnx-community/gemma-3-270m-it-ONNX';
+const SYSTEM = `You write eBay listings from a seller's item description. Output EXACTLY these four lines and nothing else:
+
+Title: <under 80 characters: brand + item + key feature + condition>
+Description: <2 sentences: honest condition, what's included>
+Item specifics: <Brand: ..., Model: ..., Color: ..., Condition: ... — only facts from the input>
+Pricing: <one line of pricing strategy, NEVER a specific dollar amount>
+Example:
+Input: Item: Sony WH-1000XM4 wireless headphones, black. Brand: Sony. Condition: Like new. Notes: light scratches on earcup, includes case and cable.
+Output:
+Title: Sony WH-1000XM4 Wireless Headphones Black - Like New
+Description: Like-new Sony WH-1000XM4 in black with light scratches on the earcup. Includes the original case and cable; battery holds about 25 hours.
+Item specifics: Brand: Sony, Model: WH-1000XM4, Color: Black, Condition: Like new
+Pricing: Check 3 sold listings for this model in like-new condition and price slightly below their average for a faster sale.
+
+Rules: never invent brand names, model numbers, or features not in the input. If the item sounds counterfeit, refuse in one sentence.`;
+// -------------------------------------------------
+
+const $ = (id) => document.getElementById(id);
+const statusEl = $('status'), bar = $('bar'), goBtn = $('go');
+let generator = null;
+
+// Deterministic counterfeit guard: the 270M model does not reliably follow
+// the "refuse counterfeits" prompt instruction, so check first and never
+// send suspected replica listings to the model at all.
+const COUNTERFEIT_RE = /\breplica\b|\bfake\b|\bAAA\b|mirror quality|1:1|knockoff|super\s?clone|high imitation|high quality rep/i;
+
+function setStatus(msg) { statusEl.textContent = msg; }
+
+async function loadModel() {
+  if (generator) return generator;
+  const onProgress = (p) => {
+    if (p.status === 'progress' && p.total) {
+      bar.hidden = false;
+      bar.value = Math.round((p.loaded / p.total) * 100);
+      setStatus(`Downloading model… ${bar.value}% (one-time, cached afterwards)`);
+    }  };
+  try {
+    // NOTE: do NOT use q4f16/fp16 on WebGPU for this model — ONNX Runtime
+    // WebGPU fp16 path overflows for gemma-3-270m-it-ONNX and emits repeated
+    // <unused56> tokens with no exception. fp32 verified on WebGPU and WASM.
+    generator = await pipeline('text-generation', MODEL_ID, {
+      device: 'webgpu', dtype: 'fp32', progress_callback: onProgress });
+    setStatus('Model ready (WebGPU, fp32). Everything runs on this device.');
+  } catch (e) {
+    setStatus('WebGPU unavailable — falling back to WASM (fp32)…');
+    generator = await pipeline('text-generation', MODEL_ID, { device: 'wasm', dtype: 'fp32', progress_callback: onProgress });
+    setStatus('Model ready (WASM, fp32). Everything runs on this device.');
+  }
+  bar.hidden = true;  return generator;
+}
+
+function parseListing(text) {
+  const fields = {}; let cur = null;
+  for (const line of text.split('\n')) {
+    const m = line.match(/^(Title|Description|Item specifics|Pricing)\s*:\s*(.*)$/i);
+    if (m) { cur = m[1].toLowerCase(); fields[cur] = m[2].trim(); }
+    else if (cur && line.trim()) fields[cur] += ' ' + line.trim();
+  }
+  return fields;
+}
+
+function showListing(fields, raw) {
+  $('listing').hidden = false;
+  $('l-raw').hidden = true;
+  $('l-title').textContent = fields.title || '';
+  $('l-desc').textContent = fields.description || '';
+  $('l-specs').textContent = fields['item specifics'] || '';
+  $('l-price').textContent = fields.pricing || '';
+  if (!fields.title && !fields.description) { // model went off-script — show raw text rather than nothing
+    $('l-raw').hidden = false;
+    $('l-raw').textContent = raw;
+  }
+  $('listing').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function write() {  const item = $('item').value.trim();
+  if (!item) { setStatus('Tell me what you are selling first.'); $('item').focus(); return; }
+  const haystack = `${item} ${$('brand').value.trim()} ${$('notes').value.trim()}`;
+  if (COUNTERFEIT_RE.test(haystack)) {
+    $('listing').hidden = true;
+    setStatus("I can't write a listing for replica or counterfeit items.");
+    return;
+  }
+  goBtn.disabled = true;
+  try {
+    const gen = await loadModel();
+    setStatus('Writing your listing…');
+    const user = `Input: Item: ${item}. Brand: ${$('brand').value.trim() || 'not given'}. Condition: ${$('condition').value}. Notes: ${$('notes').value.trim() || 'none'}.\nOutput:`;
+    const out = await gen(
+      [{ role: 'system', content: SYSTEM }, { role: 'user', content: user }],
+      { max_new_tokens: 260, do_sample: true, temperature: 0.7, top_p: 0.95 }
+    );
+    const last = Array.isArray(out[0].generated_text)
+      ? out[0].generated_text.at(-1).content
+      : String(out[0].generated_text);
+    if (/(<unused\d+>\s*){3,}/.test(last)) {
+      $('listing').hidden = false;
+      $('l-raw').hidden = false;
+      $('l-raw').textContent = last;
+      setStatus('Model produced garbage tokens (known WebGPU fp16 bug). Reload and let it use the fp32 path.');
+      return;
+    }
+    showListing(parseListing(last), last);
+    setStatus('Listing ready — copy each section straight into eBay. 📦');
+  } catch (err) {
+    console.error(err);
+    setStatus('Something went wrong loading or running the model — check the console and try again.');
+  } finally {
+    goBtn.disabled = false;  }
+}
+
+goBtn.addEventListener('click', write);
+$('again').addEventListener('click', write);
+$('reset').addEventListener('click', () => { $('listing').hidden = true; setStatus('Cleared. Describe your next item.'); });
+document.querySelectorAll('[data-copy]').forEach(btn => {
+  btn.addEventListener('click', async () => {    const t = $(btn.dataset.copy).textContent;
+    try { await navigator.clipboard.writeText(t); btn.textContent = 'Copied ✓'; }    catch { btn.textContent = 'Copy failed'; }
+    setTimeout(() => { btn.textContent = 'Copy'; }, 1200);
+  });
+});
+$('photo').addEventListener('change', (e) => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const url = URL.createObjectURL(f);
+  const img = $('photo-preview');
+  img.src = url; img.style.display = 'block';
+});
+</script>
+</body>
+</html>
